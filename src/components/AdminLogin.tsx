@@ -218,6 +218,21 @@ export default function AdminLogin({ onSuccess, onBack }: Props) {
             {mode === 'login' ? 'No tienes cuenta? Solicita acceso' : 'Ya tienes cuenta? Inicia sesion'}
           </button>
 
+          {mode === 'login' && (
+            <div className="mt-4 pt-4 border-t border-slate-100 text-center">
+              <button
+                type="button"
+                onClick={() => {
+                  setEmail('admin@rtst.com');
+                  setPassword('admin123');
+                }}
+                className="text-[11px] text-amber-700 hover:text-amber-800 bg-amber-50 hover:bg-amber-100 px-3 py-1.5 rounded-lg font-medium transition-colors"
+              >
+                Llenar credenciales demo (Super Admin)
+              </button>
+            </div>
+          )}
+
           {mode === 'signup' && (
             <div className="mt-4 flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-xl p-3">
               <ShieldAlert className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />

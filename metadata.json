@@ -1,0 +1,8 @@
+{
+  "name": "RTST Carora · Pagos WISP",
+  "description": "Sistema de consulta de servicio y reporte de pagos para clientes y administración WISP RTST Carora.",
+  "permissions": [],
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

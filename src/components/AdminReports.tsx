@@ -159,7 +159,42 @@ function DebtorsReport({ plans, sectors }: { plans: Plan[]; sectors: Sector[] })
   const totalDebt = debtors.reduce((sum, r) => sum + r.debt, 0);
   const totalPaid = paid.reduce((sum, r) => sum + r.paid_amount, 0);
 
-  const downloadCSV = () => {
+  const buildHeader = (lines: string[], title: string, dueDay: number, monthName: string) => {
+    lines.push(`# ${title} - ${monthName}`);
+    lines.push(`# Fecha de corte: dia ${dueDay} de ${monthName}`);
+    lines.push(`# Zona/Sector: ${selectedSectorName || 'Todas las zonas'}`);
+  };
+
+  const rowToCsv = (r: DebtorRow, situacion: string) =>
+    [
+      formatCedula(r.cedula),
+      `"${r.full_name}"`,
+      `"${r.plan_name}"`,
+      `"${r.sector_name}"`,
+      r.phone,
+      r.monthly_amount.toFixed(2),
+      r.paid_amount.toFixed(2),
+      r.debt.toFixed(2),
+      r.due_day,
+      statusLabel(r.status),
+      situacion,
+    ].join(',');
+
+  const triggerDownload = (lines: string[], filename: string) => {
+    const blob = new Blob(['\ufeff' + lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const sectorSuffix = selectedSectorName
+    ? `_${selectedSectorName.replace(/\s+/g, '_').toLowerCase()}`
+    : '_todas_las_zonas';
+
+  const downloadDebtorsCSV = () => {
     if (!report) return;
     const [year, month] = monthYear.split('-').map(Number);
     const dueDay = settings?.due_day || 5;
@@ -182,83 +217,57 @@ function DebtorsReport({ plans, sectors }: { plans: Plan[]; sectors: Sector[] })
       'Situacion',
     ];
 
-    const csvLines: string[] = [];
-    csvLines.push(`# Reporte de Pagos y Morosos - ${monthName}`);
-    csvLines.push(`# Fecha de corte: dia ${dueDay} de ${monthName}`);
-    if (selectedSectorName) {
-      csvLines.push(`# Zona/Sector: ${selectedSectorName}`);
-    } else {
-      csvLines.push(`# Zona/Sector: Todas las zonas`);
-    }
-    csvLines.push(`# Total clientes: ${report.length}`);
-    csvLines.push(`# Clientes al dia: ${paid.length}`);
-    csvLines.push(`# Morosos: ${debtors.length}`);
-    csvLines.push(`# Total cobrado: $${totalPaid.toFixed(2)}`);
-    csvLines.push(`# Total por cobrar: $${totalDebt.toFixed(2)}`);
-    csvLines.push('');
-    csvLines.push(headers.join(','));
+    const lines: string[] = [];
+    buildHeader(lines, 'Reporte de Morosos', dueDay, monthName);
+    lines.push(`# Total morosos: ${debtors.length}`);
+    lines.push(`# Total por cobrar: ${totalDebt.toFixed(2)}`);
+    lines.push('');
+    lines.push(headers.join(','));
+    debtors.forEach((r) => lines.push(rowToCsv(r, 'MOROSO')));
+    lines.push('');
+    lines.push('--- RESUMEN ---');
+    lines.push(`Morosos,${debtors.length}`);
+    lines.push(`Total por cobrar (USD),${totalDebt.toFixed(2)}`);
 
-    // Morosos first
-    csvLines.push('');
-    csvLines.push('--- MOROSOS ---');
-    debtors.forEach((r) => {
-      csvLines.push(
-        [
-          formatCedula(r.cedula),
-          `"${r.full_name}"`,
-          `"${r.plan_name}"`,
-          `"${r.sector_name}"`,
-          r.phone,
-          r.monthly_amount.toFixed(2),
-          r.paid_amount.toFixed(2),
-          r.debt.toFixed(2),
-          r.due_day,
-          statusLabel(r.status),
-          'MOROSO',
-        ].join(',')
-      );
+    triggerDownload(lines, `reporte_morosos_${monthYear}${sectorSuffix}.csv`);
+  };
+
+  const downloadPaidCSV = () => {
+    if (!report) return;
+    const [year, month] = monthYear.split('-').map(Number);
+    const dueDay = settings?.due_day || 5;
+    const monthName = new Date(year, month - 1).toLocaleDateString('es-VE', {
+      month: 'long',
+      year: 'numeric',
     });
 
-    // Then paid
-    csvLines.push('');
-    csvLines.push('--- AL DIA ---');
-    paid.forEach((r) => {
-      csvLines.push(
-        [
-          formatCedula(r.cedula),
-          `"${r.full_name}"`,
-          `"${r.plan_name}"`,
-          `"${r.sector_name}"`,
-          r.phone,
-          r.monthly_amount.toFixed(2),
-          r.paid_amount.toFixed(2),
-          r.debt.toFixed(2),
-          r.due_day,
-          statusLabel(r.status),
-          'AL DIA',
-        ].join(',')
-      );
-    });
+    const headers = [
+      'Cedula',
+      'Nombre',
+      'Plan',
+      'Sector',
+      'Telefono',
+      'Monto Mensual (USD)',
+      'Ya Pagado (USD)',
+      'Saldo Pendiente (USD)',
+      'Dia de Corte',
+      'Estado',
+      'Situacion',
+    ];
 
-    // Summary
-    csvLines.push('');
-    csvLines.push('--- RESUMEN ---');
-    csvLines.push(`Total clientes,${report.length}`);
-    csvLines.push(`Clientes al dia,${paid.length}`);
-    csvLines.push(`Morosos,${debtors.length}`);
-    csvLines.push(`Total cobrado (USD),${totalPaid.toFixed(2)}`);
-    csvLines.push(`Total por cobrar (USD),${totalDebt.toFixed(2)}`);
+    const lines: string[] = [];
+    buildHeader(lines, 'Reporte de Pagos Aprobados', dueDay, monthName);
+    lines.push(`# Total clientes al dia: ${paid.length}`);
+    lines.push(`# Total cobrado: ${totalPaid.toFixed(2)}`);
+    lines.push('');
+    lines.push(headers.join(','));
+    paid.forEach((r) => lines.push(rowToCsv(r, 'AL DIA')));
+    lines.push('');
+    lines.push('--- RESUMEN ---');
+    lines.push(`Clientes al dia,${paid.length}`);
+    lines.push(`Total cobrado (USD),${totalPaid.toFixed(2)}`);
 
-    const blob = new Blob(['\ufeff' + csvLines.join('\n')], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    const sectorSuffix = selectedSectorName
-      ? `_${selectedSectorName.replace(/\s+/g, '_').toLowerCase()}`
-      : '_todas_las_zonas';
-    a.download = `reporte_morosos_${monthYear}${sectorSuffix}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    triggerDownload(lines, `reporte_pagados_${monthYear}${sectorSuffix}.csv`);
   };
 
   const monthOptions: { value: string; label: string }[] = [];
@@ -403,13 +412,60 @@ function DebtorsReport({ plans, sectors }: { plans: Plan[]; sectors: Sector[] })
             </div>
           )}
 
-          <button
-            onClick={downloadCSV}
-            className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 px-6 rounded-xl flex items-center justify-center gap-2 transition-all text-sm w-full sm:w-auto"
-          >
-            <FileDown className="w-4 h-4" />
-            <span>Descargar CSV{selectedSectorName ? ` - ${selectedSectorName}` : ' - Todas las zonas'}</span>
-          </button>
+          {/* Paid clients table preview */}
+          {paid.length > 0 && (
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-xs font-bold text-slate-700">
+                  Clientes al dia ({paid.length})
+                </h3>
+              </div>
+              <div className="overflow-x-auto max-h-64 overflow-y-auto rounded-xl border border-slate-100">
+                <table className="w-full text-xs">
+                  <thead className="bg-slate-50 sticky top-0">
+                    <tr>
+                      <th className="text-left px-3 py-2 font-bold text-slate-600">Cedula</th>
+                      <th className="text-left px-3 py-2 font-bold text-slate-600">Nombre</th>
+                      <th className="text-right px-3 py-2 font-bold text-slate-600">Mensual</th>
+                      <th className="text-right px-3 py-2 font-bold text-slate-600">Pagado</th>
+                      <th className="text-right px-3 py-2 font-bold text-slate-600">Saldo</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                    {paid.map((r, i) => (
+                      <tr key={i} className="hover:bg-emerald-50/30">
+                        <td className="px-3 py-2 font-mono text-slate-700">{formatCedula(r.cedula)}</td>
+                        <td className="px-3 py-2 text-slate-700">{r.full_name}</td>
+                        <td className="px-3 py-2 text-right text-slate-600">{formatUSD(r.monthly_amount)}</td>
+                        <td className="px-3 py-2 text-right text-emerald-600">{formatUSD(r.paid_amount)}</td>
+                        <td className="px-3 py-2 text-right text-slate-400">{formatUSD(r.debt)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Separate download buttons */}
+          <div className="flex flex-col sm:flex-row gap-3">
+            <button
+              onClick={downloadDebtorsCSV}
+              disabled={debtors.length === 0}
+              className="flex-1 bg-rose-600 hover:bg-rose-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold py-3 px-6 rounded-xl flex items-center justify-center gap-2 transition-all text-sm"
+            >
+              <FileDown className="w-4 h-4" />
+              <span>Descargar Morosos CSV ({debtors.length})</span>
+            </button>
+            <button
+              onClick={downloadPaidCSV}
+              disabled={paid.length === 0}
+              className="flex-1 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold py-3 px-6 rounded-xl flex items-center justify-center gap-2 transition-all text-sm"
+            >
+              <FileDown className="w-4 h-4" />
+              <span>Descargar Pagados CSV ({paid.length})</span>
+            </button>
+          </div>
         </div>
       )}
     </div>

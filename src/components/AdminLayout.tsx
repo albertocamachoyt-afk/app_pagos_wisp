@@ -1,7 +1,31 @@
-import { useState, type ReactNode } from 'react';
-import { LayoutDashboard, Receipt, Users, Settings as SettingsIcon, LogOut, Menu, X, Wifi, MapPin, ShieldCheck, FileBarChart } from 'lucide-react';
+import { useState, useEffect, type ReactNode } from 'react';
+import {
+  LayoutDashboard,
+  Receipt,
+  Users,
+  Settings as SettingsIcon,
+  LogOut,
+  Menu,
+  X,
+  Wifi,
+  MapPin,
+  ShieldCheck,
+  FileBarChart,
+  AlertTriangle,
+} from 'lucide-react';
+import type { FailureReport } from '@/lib/supabase';
+import { onFailureAlert, requestPushPermission } from '@/lib/notifications';
 
-export type AdminTab = 'dashboard' | 'payments' | 'clients' | 'plans' | 'sectors' | 'admins' | 'reports' | 'settings';
+export type AdminTab =
+  | 'dashboard'
+  | 'payments'
+  | 'failures'
+  | 'clients'
+  | 'plans'
+  | 'sectors'
+  | 'admins'
+  | 'reports'
+  | 'settings';
 
 type Props = {
   activeTab: AdminTab;
@@ -9,24 +33,84 @@ type Props = {
   onSignOut: () => void;
   children: ReactNode;
   pendingCount: number;
+  pendingFailuresCount?: number;
 };
 
 const navItems: { id: AdminTab; label: string; icon: typeof LayoutDashboard }[] = [
   { id: 'dashboard', label: 'Resumen', icon: LayoutDashboard },
   { id: 'payments', label: 'Pagos', icon: Receipt },
+  { id: 'failures', label: 'Fallas / Averías', icon: AlertTriangle },
   { id: 'clients', label: 'Clientes', icon: Users },
   { id: 'plans', label: 'Planes', icon: Wifi },
   { id: 'sectors', label: 'Sectores', icon: MapPin },
   { id: 'admins', label: 'Admins', icon: ShieldCheck },
-  { id: 'reports', label: 'Importar/Reportes', icon: FileBarChart },
+  { id: 'reports', label: 'Reportes', icon: FileBarChart },
   { id: 'settings', label: 'Configuración', icon: SettingsIcon },
 ];
 
-export default function AdminLayout({ activeTab, onTabChange, onSignOut, children, pendingCount }: Props) {
+export default function AdminLayout({
+  activeTab,
+  onTabChange,
+  onSignOut,
+  children,
+  pendingCount,
+  pendingFailuresCount = 0,
+}: Props) {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [activeToast, setActiveToast] = useState<FailureReport | null>(null);
+
+  // Request browser push notification permission and listen for alerts
+  useEffect(() => {
+    requestPushPermission();
+
+    const unsubscribe = onFailureAlert((report) => {
+      setActiveToast(report);
+      // Auto-dismiss in 10 seconds
+      setTimeout(() => {
+        setActiveToast((current) => (current?.id === report.id ? null : current));
+      }, 10000);
+    });
+
+    return () => unsubscribe();
+  }, []);
 
   return (
-    <div className="min-h-screen bg-slate-50 flex">
+    <div className="min-h-screen bg-slate-50 flex relative">
+      {/* Floating Push Alert Banner */}
+      {activeToast && (
+        <div className="fixed top-5 right-5 z-50 max-w-sm w-full bg-slate-900 text-white rounded-2xl p-4 shadow-2xl border border-rose-500/50 animate-slide-in-right flex items-start gap-3">
+          <div className="w-10 h-10 rounded-xl bg-rose-500/20 text-rose-400 flex items-center justify-center shrink-0 border border-rose-500/40">
+            <AlertTriangle className="w-5 h-5 text-rose-400 animate-pulse" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-rose-400">
+                ¡Nueva Avería Reportada!
+              </span>
+              <button
+                onClick={() => setActiveToast(null)}
+                className="text-slate-400 hover:text-white p-0.5"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <p className="text-xs font-bold text-white mt-1 truncate">{activeToast.client_name}</p>
+            <p className="text-[11px] text-slate-300 mt-0.5 truncate">
+              {activeToast.issue_type} · {activeToast.sector_name || 'Carora'}
+            </p>
+            <button
+              onClick={() => {
+                onTabChange('failures');
+                setActiveToast(null);
+              }}
+              className="mt-2.5 text-xs font-bold text-slate-900 bg-amber-400 hover:bg-amber-300 px-3 py-1.5 rounded-lg transition-colors inline-flex items-center gap-1 shadow-sm"
+            >
+              <span>Ver reporte de avería</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Desktop sidebar */}
       <aside className="hidden md:flex flex-col w-60 bg-slate-900 text-white shrink-0">
         <div className="p-5 border-b border-slate-800">
@@ -44,6 +128,8 @@ export default function AdminLayout({ activeTab, onTabChange, onSignOut, childre
           {navItems.map((item) => {
             const Icon = item.icon;
             const active = activeTab === item.id;
+            const isPayments = item.id === 'payments';
+            const isFailures = item.id === 'failures';
             return (
               <button
                 key={item.id}
@@ -56,13 +142,22 @@ export default function AdminLayout({ activeTab, onTabChange, onSignOut, childre
               >
                 <Icon className="w-4 h-4 shrink-0" />
                 <span>{item.label}</span>
-                {item.id === 'payments' && pendingCount > 0 && (
+                {isPayments && pendingCount > 0 && (
                   <span
                     className={`ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
                       active ? 'bg-slate-900 text-amber-400' : 'bg-rose-500 text-white'
                     }`}
                   >
                     {pendingCount}
+                  </span>
+                )}
+                {isFailures && pendingFailuresCount > 0 && (
+                  <span
+                    className={`ml-auto text-[10px] font-bold px-2 py-0.5 rounded-full animate-pulse ${
+                      active ? 'bg-slate-900 text-rose-400' : 'bg-rose-600 text-white'
+                    }`}
+                  >
+                    {pendingFailuresCount}
                   </span>
                 )}
               </button>
@@ -81,7 +176,7 @@ export default function AdminLayout({ activeTab, onTabChange, onSignOut, childre
       </aside>
 
       {/* Mobile header */}
-      <div className="md:hidden fixed top-0 left-0 right-0 z-50 bg-slate-900 text-white px-4 py-3 flex items-center justify-between">
+      <div className="md:hidden fixed top-0 left-0 right-0 z-40 bg-slate-900 text-white px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <div className="w-8 h-8 rounded-full bg-white flex items-center justify-center">
             <span className="text-black font-black text-[10px]">RTST</span>
@@ -111,6 +206,8 @@ export default function AdminLayout({ activeTab, onTabChange, onSignOut, childre
               {navItems.map((item) => {
                 const Icon = item.icon;
                 const active = activeTab === item.id;
+                const isPayments = item.id === 'payments';
+                const isFailures = item.id === 'failures';
                 return (
                   <button
                     key={item.id}
@@ -126,13 +223,22 @@ export default function AdminLayout({ activeTab, onTabChange, onSignOut, childre
                   >
                     <Icon className="w-4 h-4 shrink-0" />
                     <span>{item.label}</span>
-                    {item.id === 'payments' && pendingCount > 0 && (
+                    {isPayments && pendingCount > 0 && (
                       <span
                         className={`ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
                           active ? 'bg-slate-900 text-amber-400' : 'bg-rose-500 text-white'
                         }`}
                       >
                         {pendingCount}
+                      </span>
+                    )}
+                    {isFailures && pendingFailuresCount > 0 && (
+                      <span
+                        className={`ml-auto text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                          active ? 'bg-slate-900 text-rose-400' : 'bg-rose-600 text-white'
+                        }`}
+                      >
+                        {pendingFailuresCount}
                       </span>
                     )}
                   </button>

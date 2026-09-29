@@ -15,6 +15,8 @@ import AdminSectors from '@/components/AdminSectors';
 import AdminSettings from '@/components/AdminSettings';
 import AdminAdmins from '@/components/AdminAdmins';
 import AdminReports from '@/components/AdminReports';
+import AdminFailures from '@/components/AdminFailures';
+import { onFailureAlert } from '@/lib/notifications';
 
 type View = 'client-lookup' | 'payment-report' | 'admin-login' | 'admin-panel' | 'admin-pending';
 
@@ -26,6 +28,7 @@ export default function App() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [adminTab, setAdminTab] = useState<AdminTab>('dashboard');
   const [pendingCount, setPendingCount] = useState(0);
+  const [pendingFailuresCount, setPendingFailuresCount] = useState(0);
 
   const verifyAdmin = async (): Promise<boolean> => {
     const { data } = await supabase.rpc('is_admin');
@@ -70,31 +73,39 @@ export default function App() {
   // Load pending count for admin badge
   useEffect(() => {
     if (session) {
-      loadPendingCount();
+      loadPendingCounts();
     }
-  }, [session, adminTab]);
-
-  const loadPendingCount = async () => {
-    const { count } = await supabase
-      .from('payments')
-      .select('*', { count: 'exact', head: true })
-      .eq('status', 'pendiente');
-    setPendingCount(count || 0);
-  };
-
-  // Listen for demo cedula clicks
-  useEffect(() => {
-    const handler = (e: Event) => {
-      const cedula = (e as CustomEvent).detail;
-      const input = document.querySelector('input[placeholder*="cédula"]') as HTMLInputElement;
-      if (input) {
-        input.value = cedula.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
-        input.dispatchEvent(new Event('input', { bubbles: true }));
+    const unsubscribe = onFailureAlert(() => {
+      loadPendingCounts();
+    });
+    const handleDeleted = () => {
+      loadPendingCounts();
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('failure-report-deleted', handleDeleted);
+    }
+    return () => {
+      unsubscribe();
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('failure-report-deleted', handleDeleted);
       }
     };
-    window.addEventListener('demo-cedula', handler);
-    return () => window.removeEventListener('demo-cedula', handler);
-  }, []);
+  }, [session, adminTab]);
+
+  const loadPendingCounts = async () => {
+    const [{ count: payCount }, { count: failCount }] = await Promise.all([
+      supabase
+        .from('payments')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', 'pendiente'),
+      supabase
+        .from('failure_reports')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', 'pendiente'),
+    ]);
+    setPendingCount(payCount || 0);
+    setPendingFailuresCount(failCount || 0);
+  };
 
   const handleSignOut = async () => {
     await supabase.auth.signOut();
@@ -145,9 +156,11 @@ export default function App() {
         onTabChange={setAdminTab}
         onSignOut={handleSignOut}
         pendingCount={pendingCount}
+        pendingFailuresCount={pendingFailuresCount}
       >
         {adminTab === 'dashboard' && <AdminDashboard onNavigate={setAdminTab} />}
         {adminTab === 'payments' && <AdminPayments session={session} />}
+        {adminTab === 'failures' && <AdminFailures />}
         {adminTab === 'clients' && <AdminClients />}
         {adminTab === 'plans' && <AdminPlans />}
         {adminTab === 'sectors' && <AdminSectors />}

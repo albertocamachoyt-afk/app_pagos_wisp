@@ -24,6 +24,7 @@ export default function AdminDashboard({ onNavigate }: Props) {
     activeClients: 0,
     suspendedClients: 0,
     pendingPayments: 0,
+    pendingFailures: 0,
     approvedPayments: 0,
     rejectedPayments: 0,
     totalRevenue: 0,
@@ -36,6 +37,22 @@ export default function AdminDashboard({ onNavigate }: Props) {
 
   useEffect(() => {
     loadDashboard();
+
+    const handleFailureChange = () => {
+      loadDashboard();
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('failure-report-deleted', handleFailureChange);
+      window.addEventListener('new-failure-report', handleFailureChange);
+    }
+
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('failure-report-deleted', handleFailureChange);
+        window.removeEventListener('new-failure-report', handleFailureChange);
+      }
+    };
   }, []);
 
   const loadDashboard = async () => {
@@ -47,6 +64,7 @@ export default function AdminDashboard({ onNavigate }: Props) {
       { count: approvedCount },
       { count: rejectedCount },
       { data: approvedPay },
+      { count: pendingFailuresCount },
     ] = await Promise.all([
       supabase.from('clients').select('*, plan:plans(*), sector:sectors(*)'),
       supabase.from('payments').select('*, client:clients(*)').order('submitted_at', { ascending: false }).limit(5),
@@ -54,6 +72,7 @@ export default function AdminDashboard({ onNavigate }: Props) {
       supabase.from('payments').select('*', { count: 'exact', head: true }).eq('status', 'aprobado'),
       supabase.from('payments').select('*', { count: 'exact', head: true }).eq('status', 'rechazado'),
       supabase.from('payments').select('amount_usd').eq('status', 'aprobado'),
+      supabase.from('failure_reports').select('*', { count: 'exact', head: true }).eq('status', 'pendiente'),
     ]);
 
     const clientList = (clients || []) as Client[];
@@ -64,6 +83,7 @@ export default function AdminDashboard({ onNavigate }: Props) {
       activeClients: clientList.filter((c) => c.status === 'activo').length,
       suspendedClients: clientList.filter((c) => c.status !== 'activo').length,
       pendingPayments: pendingCount || 0,
+      pendingFailures: pendingFailuresCount || 0,
       approvedPayments: approvedCount || 0,
       rejectedPayments: rejectedCount || 0,
       totalRevenue: (approvedPay || []).reduce((sum, p) => sum + Number(p.amount_usd), 0),
@@ -102,8 +122,38 @@ export default function AdminDashboard({ onNavigate }: Props) {
     <div className="space-y-6 animate-fade-in">
       <div>
         <h1 className="text-2xl font-bold text-slate-900">Resumen General</h1>
-        <p className="text-sm text-slate-500 mt-1">Estado actual del sistema de pagos RTST</p>
+        <p className="text-sm text-slate-500 mt-1">Estado actual del sistema de pagos y averías RTST</p>
       </div>
+
+      {/* Failure Alert Banner if any pending failures */}
+      {stats.pendingFailures > 0 && (
+        <div
+          onClick={() => onNavigate('failures')}
+          className="cursor-pointer bg-gradient-to-r from-rose-600 via-rose-500 to-amber-600 text-white rounded-2xl p-4 shadow-lg flex items-center justify-between gap-4 hover:shadow-xl hover:scale-[1.005] transition-all"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-11 h-11 rounded-2xl bg-white/20 flex items-center justify-center shrink-0 border border-white/20">
+              <AlertTriangle className="w-6 h-6 text-white animate-bounce" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="font-extrabold text-sm sm:text-base">
+                  {stats.pendingFailures} {stats.pendingFailures === 1 ? 'Avería Técnica Reportada' : 'Averías Técnicas Reportadas'}
+                </h3>
+                <span className="bg-white/25 text-white text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
+                  Alerta Prioritaria
+                </span>
+              </div>
+              <p className="text-xs text-white/90 mt-0.5">
+                Clientes han reportado fallas en el servicio. Haz clic para revisar los reportes y atenderlos.
+              </p>
+            </div>
+          </div>
+          <span className="shrink-0 text-xs font-bold bg-white text-rose-700 px-3.5 py-2 rounded-xl shadow-xs hidden sm:inline-block">
+            Atender Averías →
+          </span>
+        </div>
+      )}
 
       {/* Stats grid */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">

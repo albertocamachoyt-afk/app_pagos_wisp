@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Search, AlertCircle, Loader2 } from 'lucide-react';
 import { supabase, type Client, type Settings } from '@/lib/supabase';
-import { formatCedula, parseCedula, statusColor, statusLabel, formatUSD } from '@/lib/format';
+import { formatCedula, parseCedula } from '@/lib/format';
 
 type Props = {
   onFound: (client: Client, settings: Settings) => void;
@@ -110,33 +110,6 @@ export default function ClientLookup({ onFound }: Props) {
         <p className="text-[11px] text-slate-500">
           Si no conoces tu número de cédula registrado, contacta a administración de RTST.
         </p>
-      </div>
-
-      <DemoAccounts />
-    </div>
-  );
-}
-
-function DemoAccounts() {
-  const demoCedulas = ['12345678', '23456789', '45678901'];
-  return (
-    <div className="mt-6 bg-slate-50 rounded-xl p-3 border border-slate-100">
-      <p className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold mb-2">
-        Cédulas de prueba
-      </p>
-      <div className="flex flex-wrap gap-2">
-        {demoCedulas.map((c) => (
-          <button
-            key={c}
-            onClick={() => {
-              const event = new CustomEvent('demo-cedula', { detail: c });
-              window.dispatchEvent(event);
-            }}
-            className="text-[11px] font-mono text-slate-600 bg-white border border-slate-200 rounded-lg px-2 py-1 hover:border-amber-400 hover:text-amber-700 transition-colors"
-          >
-            {formatCedula(c)}
-          </button>
-        ))}
       </div>
     </div>
   );

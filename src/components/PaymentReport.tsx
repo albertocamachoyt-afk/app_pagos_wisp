@@ -10,8 +10,10 @@ import {
   CheckCheck,
   Clock,
   XCircle,
+  AlertTriangle,
 } from 'lucide-react';
 import { supabase, type Client, type Settings, type Payment } from '@/lib/supabase';
+import ClientReportFailureModal from '@/components/ClientReportFailureModal';
 import {
   formatCedula,
   formatUSD,
@@ -36,6 +38,7 @@ export default function PaymentReport({ client, settings, onBack }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [history, setHistory] = useState<Payment[]>([]);
   const [historyLoaded, setHistoryLoaded] = useState(false);
+  const [showFailureModal, setShowFailureModal] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const amountBs = Number((client.monthly_amount * settings.bcv_rate).toFixed(2));
@@ -158,9 +161,20 @@ export default function PaymentReport({ client, settings, onBack }: Props) {
             <ArrowLeft className="w-4 h-4" />
             Volver
           </button>
-          <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
-            Cédula Verificada
-          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setShowFailureModal(true)}
+              className="inline-flex items-center gap-1.5 text-xs font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 px-3 py-1 rounded-full transition-all active:scale-95 shadow-xs"
+              title="Reportar avería o caída de servicio"
+            >
+              <AlertTriangle className="w-3.5 h-3.5 text-rose-600" />
+              <span>Reportar Falla</span>
+            </button>
+            <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
+              Cédula Verificada
+            </span>
+          </div>
         </div>
 
         {/* Client info */}
@@ -375,6 +389,13 @@ export default function PaymentReport({ client, settings, onBack }: Props) {
             ))}
           </div>
         </div>
+      )}
+
+      {showFailureModal && (
+        <ClientReportFailureModal
+          client={client}
+          onClose={() => setShowFailureModal(false)}
+        />
       )}
     </div>
   );

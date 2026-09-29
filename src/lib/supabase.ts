@@ -87,6 +87,23 @@ export type PaymentAudit = {
   performed_at: string;
 };
 
+export type FailureReport = {
+  id: string;
+  client_id: string;
+  client_name: string;
+  client_cedula: string;
+  client_phone: string | null;
+  sector_name: string | null;
+  plan_name: string | null;
+  issue_type: string;
+  description: string;
+  status: 'pendiente' | 'en_revision' | 'resuelto';
+  admin_notes: string | null;
+  created_at: string;
+  updated_at: string;
+  client?: Client;
+};
+
 export const PAYMENT_STATUS = {
   PENDIENTE: 'pendiente',
   APROBADO: 'aprobado',
@@ -292,6 +309,24 @@ const initialAdmins: AdminRecord[] = [
   },
 ];
 
+const initialFailureReports: FailureReport[] = [
+  {
+    id: 'fail-1',
+    client_id: 'client-2',
+    client_name: 'María Rodríguez',
+    client_cedula: '23456789',
+    client_phone: '0414-9876543',
+    sector_name: 'Carora Norte',
+    plan_name: 'Plan Fibra 100M',
+    issue_type: 'Luz roja en el Router / Módem (LOS / Alarm)',
+    description: 'La luz de LOS en la ONT parpadea en rojo desde esta mañana a las 8am. No hay señal de internet.',
+    status: 'pendiente',
+    admin_notes: null,
+    created_at: '2026-09-28T14:10:00Z',
+    updated_at: '2026-09-28T14:10:00Z',
+  },
+];
+
 class MockDatabase {
   plans: Plan[] = getStored('plans', initialPlans);
   sectors: Sector[] = getStored('sectors', initialSectors);
@@ -300,6 +335,7 @@ class MockDatabase {
   payments: Payment[] = getStored('payments', initialPayments);
   paymentAudit: PaymentAudit[] = getStored('payment_audit', []);
   admins: AdminRecord[] = getStored('admins', initialAdmins);
+  failureReports: FailureReport[] = getStored('failure_reports', initialFailureReports);
   receiptUrls: Record<string, string> = getStored('receipt_urls', {});
 
   save(table: string) {
@@ -311,6 +347,7 @@ class MockDatabase {
       case 'payments': setStored('payments', this.payments); break;
       case 'payment_audit': setStored('payment_audit', this.paymentAudit); break;
       case 'admins': setStored('admins', this.admins); break;
+      case 'failure_reports': setStored('failure_reports', this.failureReports); break;
       case 'receipt_urls': setStored('receipt_urls', this.receiptUrls); break;
     }
   }
@@ -324,6 +361,7 @@ class MockDatabase {
       case 'payments': return this.payments;
       case 'payment_audit': return this.paymentAudit;
       case 'admins': return this.admins;
+      case 'failure_reports': return this.failureReports;
       default: return [];
     }
   }
@@ -426,6 +464,18 @@ function createQueryBuilder(tableName: string) {
             } : undefined,
           };
         });
+      } else if (tableName === 'failure_reports') {
+        rows = rows.map((f) => {
+          const cl = mockDb.clients.find((c) => c.id === f.client_id);
+          return {
+            ...f,
+            client: cl ? {
+              ...cl,
+              plan: mockDb.plans.find((pl) => pl.id === cl.plan_id) || undefined,
+              sector: mockDb.sectors.find((s) => s.id === cl.sector_id) || undefined,
+            } : undefined,
+          };
+        });
       }
 
       if (isCountOnly) {
@@ -444,7 +494,7 @@ function createQueryBuilder(tableName: string) {
       const item = data && data.length > 0 ? data[0] : null;
       return { data: item, error: null };
     },
-    async insert(itemOrItems: any) {
+    insert(itemOrItems: any) {
       const items = Array.isArray(itemOrItems) ? itemOrItems : [itemOrItems];
       const inserted: any[] = [];
 
@@ -476,15 +526,49 @@ function createQueryBuilder(tableName: string) {
         } else if (tableName === 'admins') {
           mockDb.admins.push(record as AdminRecord);
           mockDb.save('admins');
+        } else if (tableName === 'failure_reports') {
+          mockDb.failureReports.unshift(record as FailureReport);
+          mockDb.save('failure_reports');
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('new-failure-report', { detail: record }));
+          }
         }
 
         inserted.push(record);
       }
 
-      return {
-        data: Array.isArray(itemOrItems) ? inserted : inserted[0],
+      const resultData = Array.isArray(itemOrItems) ? inserted : inserted[0];
+      const resultPayload = {
+        data: resultData,
         error: null,
-        select: () => Promise.resolve({ data: Array.isArray(itemOrItems) ? inserted : inserted[0], error: null }),
+      };
+
+      const selectBuilder = {
+        then(onfulfilled?: any, onrejected?: any) {
+          return Promise.resolve(resultPayload).then(onfulfilled, onrejected);
+        },
+        single() {
+          return Promise.resolve({
+            data: Array.isArray(resultData) ? resultData[0] : resultData,
+            error: null,
+          });
+        },
+        maybeSingle() {
+          return Promise.resolve({
+            data: Array.isArray(resultData) ? resultData[0] : resultData,
+            error: null,
+          });
+        },
+      };
+
+      return {
+        ...resultPayload,
+        then(onfulfilled?: any, onrejected?: any) {
+          return Promise.resolve(resultPayload).then(onfulfilled, onrejected);
+        },
+        select(_columns?: string) {
+          return selectBuilder;
+        },
       };
     },
     async update(updates: any) {
@@ -514,24 +598,44 @@ function createQueryBuilder(tableName: string) {
 
       return { data: null, error: null };
     },
-    async delete() {
-      if (tableName === 'plans') {
-        mockDb.plans = mockDb.plans.filter((row) => !filters.every((fn) => fn(row)));
-        mockDb.save('plans');
-      } else if (tableName === 'sectors') {
-        mockDb.sectors = mockDb.sectors.filter((row) => !filters.every((fn) => fn(row)));
-        mockDb.save('sectors');
-      } else if (tableName === 'clients') {
-        mockDb.clients = mockDb.clients.filter((row) => !filters.every((fn) => fn(row)));
-        mockDb.save('clients');
-      } else if (tableName === 'payments') {
-        mockDb.payments = mockDb.payments.filter((row) => !filters.every((fn) => fn(row)));
-        mockDb.save('payments');
-      } else if (tableName === 'admins') {
-        mockDb.admins = mockDb.admins.filter((row) => !filters.every((fn) => fn(row)));
-        mockDb.save('admins');
-      }
-      return { data: null, error: null };
+    delete() {
+      const deleteBuilder: any = {
+        eq(field: string, val: any) {
+          filters.push((row) => String(row[field]) === String(val));
+          return deleteBuilder;
+        },
+        async execute() {
+          const toRemove = (row: any) => {
+            if (filters.length === 0) return true;
+            return filters.every((fn) => fn(row));
+          };
+
+          if (tableName === 'plans') {
+            mockDb.plans = mockDb.plans.filter((row) => !toRemove(row));
+            mockDb.save('plans');
+          } else if (tableName === 'sectors') {
+            mockDb.sectors = mockDb.sectors.filter((row) => !toRemove(row));
+            mockDb.save('sectors');
+          } else if (tableName === 'clients') {
+            mockDb.clients = mockDb.clients.filter((row) => !toRemove(row));
+            mockDb.save('clients');
+          } else if (tableName === 'payments') {
+            mockDb.payments = mockDb.payments.filter((row) => !toRemove(row));
+            mockDb.save('payments');
+          } else if (tableName === 'admins') {
+            mockDb.admins = mockDb.admins.filter((row) => !toRemove(row));
+            mockDb.save('admins');
+          } else if (tableName === 'failure_reports') {
+            mockDb.failureReports = mockDb.failureReports.filter((row) => !toRemove(row));
+            mockDb.save('failure_reports');
+          }
+          return { data: null, error: null };
+        },
+        then(resolve: any, reject?: any) {
+          return deleteBuilder.execute().then(resolve, reject);
+        },
+      };
+      return deleteBuilder;
     },
   };
 

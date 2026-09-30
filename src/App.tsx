@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Shield, Clock, ArrowLeft, LogOut } from 'lucide-react';
-import { supabase, type Client, type Settings, type Payment } from '@/lib/supabase';
+import { supabase, type Client, type Settings, type AdminRole } from '@/lib/supabase';
 import ClientHeader from '@/components/ClientHeader';
 import Footer from '@/components/Footer';
 import ClientLookup from '@/components/ClientLookup';
@@ -17,6 +17,7 @@ import AdminAdmins from '@/components/AdminAdmins';
 import AdminReports from '@/components/AdminReports';
 import AdminFailures from '@/components/AdminFailures';
 import { onFailureAlert } from '@/lib/notifications';
+import { checkAndAutoSyncBcv } from '@/lib/bcv';
 
 type View = 'client-lookup' | 'payment-report' | 'admin-login' | 'admin-panel' | 'admin-pending';
 
@@ -26,14 +27,24 @@ export default function App() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [session, setSession] = useState<any>(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [adminRole, setAdminRole] = useState<AdminRole>('admin');
   const [adminTab, setAdminTab] = useState<AdminTab>('dashboard');
   const [pendingCount, setPendingCount] = useState(0);
   const [pendingFailuresCount, setPendingFailuresCount] = useState(0);
 
   const verifyAdmin = async (): Promise<boolean> => {
-    const { data } = await supabase.rpc('is_admin');
-    const admin = !!data;
+    const [{ data: isAdm }, { data: currentAdm }] = await Promise.all([
+      supabase.rpc('is_admin'),
+      supabase.rpc('get_current_admin'),
+    ]);
+    const admin = !!isAdm;
     setIsAdmin(admin);
+    if (currentAdm?.role) {
+      setAdminRole(currentAdm.role);
+      if (currentAdm.role === 'operador') {
+        setAdminTab('payments');
+      }
+    }
     return admin;
   };
 
@@ -63,9 +74,16 @@ export default function App() {
       })
       .subscribe();
 
+    // Comprobación y auto-sincronización de tasa BCV al mediodía (12:00 PM)
+    checkAndAutoSyncBcv();
+    const bcvInterval = setInterval(() => {
+      checkAndAutoSyncBcv();
+    }, 15 * 60 * 1000); // Comprobar cada 15 minutos
+
     return () => {
       authListener.subscription.unsubscribe();
       supabase.removeChannel(channel);
+      clearInterval(bcvInterval);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -157,11 +175,12 @@ export default function App() {
         onSignOut={handleSignOut}
         pendingCount={pendingCount}
         pendingFailuresCount={pendingFailuresCount}
+        role={adminRole}
       >
         {adminTab === 'dashboard' && <AdminDashboard onNavigate={setAdminTab} />}
         {adminTab === 'payments' && <AdminPayments session={session} />}
         {adminTab === 'failures' && <AdminFailures />}
-        {adminTab === 'clients' && <AdminClients />}
+        {adminTab === 'clients' && <AdminClients role={adminRole} />}
         {adminTab === 'plans' && <AdminPlans />}
         {adminTab === 'sectors' && <AdminSectors />}
         {adminTab === 'settings' && <AdminSettings />}

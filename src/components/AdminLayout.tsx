@@ -13,7 +13,7 @@ import {
   FileBarChart,
   AlertTriangle,
 } from 'lucide-react';
-import type { FailureReport } from '@/lib/supabase';
+import type { FailureReport, AdminRole } from '@/lib/supabase';
 import { onFailureAlert, requestPushPermission } from '@/lib/notifications';
 
 export type AdminTab =
@@ -34,16 +34,17 @@ type Props = {
   children: ReactNode;
   pendingCount: number;
   pendingFailuresCount?: number;
+  role?: AdminRole;
 };
 
 const navItems: { id: AdminTab; label: string; icon: typeof LayoutDashboard }[] = [
   { id: 'dashboard', label: 'Resumen', icon: LayoutDashboard },
-  { id: 'payments', label: 'Pagos', icon: Receipt },
+  { id: 'payments', label: 'Pagos y Caja', icon: Receipt },
   { id: 'failures', label: 'Fallas / Averías', icon: AlertTriangle },
   { id: 'clients', label: 'Clientes', icon: Users },
   { id: 'plans', label: 'Planes', icon: Wifi },
   { id: 'sectors', label: 'Sectores', icon: MapPin },
-  { id: 'admins', label: 'Admins', icon: ShieldCheck },
+  { id: 'admins', label: 'Equipo y Roles', icon: ShieldCheck },
   { id: 'reports', label: 'Reportes', icon: FileBarChart },
   { id: 'settings', label: 'Configuración', icon: SettingsIcon },
 ];
@@ -55,9 +56,22 @@ export default function AdminLayout({
   children,
   pendingCount,
   pendingFailuresCount = 0,
+  role = 'admin',
 }: Props) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [activeToast, setActiveToast] = useState<FailureReport | null>(null);
+
+  // Filtrar ítems de navegación según el rol
+  const visibleNavItems = navItems.filter((item) => {
+    if (role === 'operador') {
+      return item.id === 'payments' || item.id === 'clients' || item.id === 'failures';
+    }
+    if (role === 'admin') {
+      // El administrador no puede gestionar otros usuarios
+      return item.id !== 'admins';
+    }
+    return true; // super_admin tiene acceso a todas
+  });
 
   // Request browser push notification permission and listen for alerts
   useEffect(() => {
@@ -120,12 +134,14 @@ export default function AdminLayout({
             </div>
             <div>
               <h1 className="text-sm font-bold">RTST Admin</h1>
-              <p className="text-[10px] text-slate-400">Panel de Gestión</p>
+              <p className="text-[10px] text-amber-400 font-semibold">
+                {role === 'super_admin' ? '👑 Super Admin' : role === 'operador' ? '💳 Operador de Caja' : '🛡️ Administrador'}
+              </p>
             </div>
           </div>
         </div>
         <nav className="flex-1 p-3 space-y-1">
-          {navItems.map((item) => {
+          {visibleNavItems.map((item) => {
             const Icon = item.icon;
             const active = activeTab === item.id;
             const isPayments = item.id === 'payments';
@@ -203,7 +219,7 @@ export default function AdminLayout({
               </button>
             </div>
             <nav className="flex-1 p-3 space-y-1">
-              {navItems.map((item) => {
+              {visibleNavItems.map((item) => {
                 const Icon = item.icon;
                 const active = activeTab === item.id;
                 const isPayments = item.id === 'payments';

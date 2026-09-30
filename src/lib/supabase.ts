@@ -284,18 +284,24 @@ const initialPayments: Payment[] = [
   },
 ];
 
-interface AdminRecord {
+export type AdminRole = 'super_admin' | 'admin' | 'operador';
+
+export interface AdminRecord {
   user_id: string;
   email: string;
+  name: string;
+  password?: string;
+  role: AdminRole;
   created_at: string;
   created_by: string | null;
-  role: 'super_admin' | 'admin';
 }
 
 const initialAdmins: AdminRecord[] = [
   {
     user_id: 'admin-super-1',
     email: 'albertocamacho26@gmail.com',
+    name: 'Alberto Camacho (Super Admin)',
+    password: 'admin',
     created_at: '2026-09-27T00:00:00Z',
     created_by: null,
     role: 'super_admin',
@@ -303,11 +309,32 @@ const initialAdmins: AdminRecord[] = [
   {
     user_id: 'admin-super-2',
     email: 'admin@rtst.com',
+    name: 'Administrador Principal',
+    password: 'admin123',
     created_at: '2026-09-27T00:00:00Z',
     created_by: null,
     role: 'super_admin',
   },
+  {
+    user_id: 'admin-op-1',
+    email: 'caja@rtst.com',
+    name: 'Operador de Pagos y Caja',
+    password: 'caja123',
+    created_at: '2026-09-28T00:00:00Z',
+    created_by: 'admin-super-1',
+    role: 'operador',
+  },
 ];
+
+function getStoredAdmins(): AdminRecord[] {
+  const stored = getStored<AdminRecord[]>('admins', initialAdmins);
+  return stored.map((a) => ({
+    ...a,
+    name: a.name || a.email.split('@')[0],
+    password: a.password || 'admin123',
+    role: (a.role === 'operador' ? 'operador' : a.role === 'super_admin' ? 'super_admin' : 'admin') as AdminRole,
+  }));
+}
 
 const initialFailureReports: FailureReport[] = [
   {
@@ -334,7 +361,7 @@ class MockDatabase {
   clients: Client[] = getStored('clients', initialClients);
   payments: Payment[] = getStored('payments', initialPayments);
   paymentAudit: PaymentAudit[] = getStored('payment_audit', []);
-  admins: AdminRecord[] = getStored('admins', initialAdmins);
+  admins: AdminRecord[] = getStoredAdmins();
   failureReports: FailureReport[] = getStored('failure_reports', initialFailureReports);
   receiptUrls: Record<string, string> = getStored('receipt_urls', {});
 
@@ -571,37 +598,70 @@ function createQueryBuilder(tableName: string) {
         },
       };
     },
-    async update(updates: any) {
+    update(updates: any) {
       const now = new Date().toISOString();
       const dataToApply = { ...updates, updated_at: now };
 
-      if (tableName === 'settings') {
-        mockDb.settings = { ...mockDb.settings, ...dataToApply };
-        mockDb.save('settings');
-        return { data: mockDb.settings, error: null };
-      }
-
-      const tableData = mockDb.getTableData(tableName);
-      for (let i = 0; i < tableData.length; i++) {
-        let matches = true;
-        for (const fn of filters) {
-          if (!fn(tableData[i])) {
-            matches = false;
-            break;
+      const updateBuilder: any = {
+        eq(field: string, val: any) {
+          filters.push((row) => String(row[field]) === String(val));
+          return updateBuilder;
+        },
+        in(field: string, vals: any[]) {
+          const valStrs = vals.map(String);
+          filters.push((row) => valStrs.includes(String(row[field])));
+          return updateBuilder;
+        },
+        select(_cols?: string) {
+          return updateBuilder;
+        },
+        single() {
+          return updateBuilder;
+        },
+        maybeSingle() {
+          return updateBuilder;
+        },
+        async execute() {
+          if (tableName === 'settings') {
+            mockDb.settings = { ...mockDb.settings, ...dataToApply };
+            mockDb.save('settings');
+            return { data: mockDb.settings, error: null };
           }
-        }
-        if (matches) {
-          tableData[i] = { ...tableData[i], ...dataToApply };
-        }
-      }
-      mockDb.save(tableName);
 
-      return { data: null, error: null };
+          const tableData = mockDb.getTableData(tableName);
+          const updatedRows: any[] = [];
+          for (let i = 0; i < tableData.length; i++) {
+            let matches = true;
+            for (const fn of filters) {
+              if (!fn(tableData[i])) {
+                matches = false;
+                break;
+              }
+            }
+            if (matches) {
+              tableData[i] = { ...tableData[i], ...dataToApply };
+              updatedRows.push(tableData[i]);
+            }
+          }
+          mockDb.save(tableName);
+          return { data: updatedRows, error: null };
+        },
+        then(resolve: any, reject?: any) {
+          return updateBuilder.execute().then(resolve, reject);
+        },
+      };
+
+      return updateBuilder;
     },
     delete() {
       const deleteBuilder: any = {
         eq(field: string, val: any) {
           filters.push((row) => String(row[field]) === String(val));
+          return deleteBuilder;
+        },
+        in(field: string, vals: any[]) {
+          const valStrs = vals.map(String);
+          filters.push((row) => valStrs.includes(String(row[field])));
           return deleteBuilder;
         },
         async execute() {
@@ -663,14 +723,31 @@ const mockSupabase = {
       };
     },
     async signInWithPassword({ email, password }: { email: string; password?: string }) {
-      if (!email || !password || password.length < 6) {
-        return { data: { user: null, session: null }, error: new Error('Correo o contraseña incorrectos') };
+      if (!email || !password) {
+        return { data: { user: null, session: null }, error: new Error('Ingresa tu correo y contraseña') };
       }
 
-      const admin = mockDb.admins.find((a) => a.email.toLowerCase() === email.toLowerCase());
+      const admin = mockDb.admins.find((a) => a.email.toLowerCase() === email.toLowerCase().trim());
+      if (!admin) {
+        return {
+          data: { user: null, session: null },
+          error: new Error('Usuario no registrado o sin acceso al sistema administrativo.'),
+        };
+      }
+
+      // Validar contraseña
+      if (admin.password && admin.password !== password) {
+        return {
+          data: { user: null, session: null },
+          error: new Error('Contraseña incorrecta. Si la olvidaste, usa la opción de recuperar contraseña.'),
+        };
+      }
+
       const user = {
-        id: admin?.user_id || `usr-${Date.now()}`,
-        email: email.toLowerCase(),
+        id: admin.user_id,
+        email: admin.email.toLowerCase(),
+        name: admin.name,
+        role: admin.role,
       };
       const session = {
         access_token: 'mock-access-token',
@@ -685,14 +762,14 @@ const mockSupabase = {
         return { data: { user: null, session: null }, error: new Error('Datos de registro inválidos') };
       }
 
-      const existingAdmin = mockDb.admins.find((a) => a.email.toLowerCase() === email.toLowerCase());
+      const existingAdmin = mockDb.admins.find((a) => a.email.toLowerCase() === email.toLowerCase().trim());
       if (existingAdmin) {
         return { data: { user: null, session: null }, error: new Error('Este correo ya está registrado.') };
       }
 
       const user = {
         id: `usr-${Date.now()}`,
-        email: email.toLowerCase(),
+        email: email.toLowerCase().trim(),
       };
       return { data: { user, session: null }, error: null };
     },
@@ -703,15 +780,97 @@ const mockSupabase = {
   },
 
   rpc(fnName: string, args?: any) {
+    const currentEmail = mockSession?.user?.email?.toLowerCase();
+    const currentAdmin = mockDb.admins.find((a) => a.email.toLowerCase() === currentEmail);
+
     if (fnName === 'is_admin') {
-      const email = mockSession?.user?.email?.toLowerCase();
-      const isAdmin = mockDb.admins.some((a) => a.email.toLowerCase() === email);
+      const isAdmin = !!currentAdmin;
       return Promise.resolve({ data: isAdmin, error: null });
     }
     if (fnName === 'is_super_admin') {
-      const email = mockSession?.user?.email?.toLowerCase();
-      const isSuper = mockDb.admins.some((a) => a.email.toLowerCase() === email && a.role === 'super_admin');
+      const isSuper = currentAdmin?.role === 'super_admin';
       return Promise.resolve({ data: isSuper, error: null });
+    }
+    if (fnName === 'get_current_admin') {
+      return Promise.resolve({ data: currentAdmin || null, error: null });
+    }
+    if (fnName === 'get_admin_role') {
+      return Promise.resolve({ data: currentAdmin?.role || null, error: null });
+    }
+    if (fnName === 'create_admin_user') {
+      const { email, name, password, role } = args || {};
+      if (!email || !password) {
+        return Promise.resolve({ error: new Error('El correo y la contraseña son obligatorios.') });
+      }
+      const targetEmail = email.toLowerCase().trim();
+      const existing = mockDb.admins.find((a) => a.email.toLowerCase() === targetEmail);
+      if (existing) {
+        return Promise.resolve({ error: new Error('Ya existe un usuario con este correo electrónico.') });
+      }
+
+      const newAdmin: AdminRecord = {
+        user_id: `admin-${Date.now()}`,
+        email: targetEmail,
+        name: (name || targetEmail.split('@')[0]).trim(),
+        password: password.trim(),
+        role: role === 'operador' ? 'operador' : 'admin',
+        created_at: new Date().toISOString(),
+        created_by: currentAdmin?.user_id || 'super_admin',
+      };
+      mockDb.admins.push(newAdmin);
+      mockDb.save('admins');
+      return Promise.resolve({ data: newAdmin, error: null });
+    }
+    if (fnName === 'update_admin_user') {
+      const { user_id, email, name, password, role } = args || {};
+      const adminIndex = mockDb.admins.findIndex((a) => a.user_id === user_id);
+      if (adminIndex === -1) {
+        return Promise.resolve({ error: new Error('Usuario no encontrado.') });
+      }
+      const target = { ...mockDb.admins[adminIndex] };
+      if (email && email.toLowerCase().trim() !== target.email.toLowerCase()) {
+        const dup = mockDb.admins.find(
+          (a) => a.email.toLowerCase() === email.toLowerCase().trim() && a.user_id !== user_id
+        );
+        if (dup) {
+          return Promise.resolve({ error: new Error('Ese correo ya está en uso por otra persona.') });
+        }
+        target.email = email.toLowerCase().trim();
+      }
+      if (name) target.name = name.trim();
+      if (password && password.trim()) target.password = password.trim();
+      if (role && target.role !== 'super_admin') {
+        target.role = role === 'operador' ? 'operador' : 'admin';
+      }
+
+      mockDb.admins[adminIndex] = target;
+      mockDb.save('admins');
+      return Promise.resolve({ data: target, error: null });
+    }
+    if (fnName === 'reset_admin_password') {
+      const { email, new_password } = args || {};
+      const targetEmail = email?.toLowerCase().trim();
+      const admin = mockDb.admins.find((a) => a.email.toLowerCase() === targetEmail);
+      if (!admin) {
+        return Promise.resolve({ error: new Error('No se encontró ninguna cuenta asociada a este correo.') });
+      }
+      if (!new_password || new_password.trim().length < 4) {
+        return Promise.resolve({ error: new Error('La contraseña debe tener al menos 4 caracteres.') });
+      }
+      admin.password = new_password.trim();
+      mockDb.save('admins');
+      return Promise.resolve({ data: true, error: null });
+    }
+    if (fnName === 'delete_admin_user') {
+      const { user_id } = args || {};
+      const target = mockDb.admins.find((a) => a.user_id === user_id);
+      if (!target) return Promise.resolve({ error: new Error('Usuario no encontrado.') });
+      if (target.role === 'super_admin') {
+        return Promise.resolve({ error: new Error('No se puede eliminar a un Superadministrador principal.') });
+      }
+      mockDb.admins = mockDb.admins.filter((a) => a.user_id !== user_id);
+      mockDb.save('admins');
+      return Promise.resolve({ data: true, error: null });
     }
     if (fnName === 'add_admin') {
       const targetEmail = args?.admin_email?.toLowerCase();
@@ -723,6 +882,8 @@ const mockSupabase = {
         mockDb.admins.push({
           user_id: `admin-${Date.now()}`,
           email: targetEmail,
+          name: targetEmail.split('@')[0],
+          password: 'admin',
           created_at: new Date().toISOString(),
           created_by: mockSession?.user?.id || null,
           role: 'admin',
